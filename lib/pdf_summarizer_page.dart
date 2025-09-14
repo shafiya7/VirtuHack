@@ -1,9 +1,10 @@
-import 'dart:io';
+import 'dart:typed_data'; 
 import 'package:Doculearn/services/gemini_service.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:syncfusion_flutter_pdf/pdf.dart'; 
+import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 class PdfSummarizerPage extends StatefulWidget {
   const PdfSummarizerPage({super.key});
@@ -13,7 +14,7 @@ class PdfSummarizerPage extends StatefulWidget {
 }
 
 class _PdfSummarizerPageState extends State<PdfSummarizerPage> {
-  final _gemini = GeminiService();
+  final _gemini = GeminiService(); // NOTE: don’t hardcode API keys in prod web builds
   PlatformFile? _picked;
   String? _summary;
   String? _error;
@@ -28,7 +29,8 @@ class _PdfSummarizerPageState extends State<PdfSummarizerPage> {
 
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['pdf'],
+      allowedExtensions: const ['pdf'],
+      withData: true, // ✅ REQUIRED so we get PlatformFile.bytes on web
     );
 
     if (!mounted) return;
@@ -46,24 +48,37 @@ class _PdfSummarizerPageState extends State<PdfSummarizerPage> {
     });
 
     try {
-
-      final bytes = File(_picked!.path!).readAsBytesSync();
+      // ✅ BYTES-FIRST (works on web & iOS)
+      late final Uint8List bytes;
+      if (_picked!.bytes != null) {
+        bytes = _picked!.bytes!;
+      } else {
+         throw Exception(
+          'No bytes available. Make sure FilePicker was called with withData: true.',
+        );
+      }
       final document = PdfDocument(inputBytes: bytes);
-
-
-      String text = '';
       final extractor = PdfTextExtractor(document);
-      for (int i = 0; i < (document.pages.count > 3 ? 3 : document.pages.count); i++) {
-        text += extractor.extractText(startPageIndex: i, endPageIndex: i);
+      final pageCount = document.pages.count;
+      final maxPages = pageCount > 3 ? 3 : pageCount;
+
+      final buf = StringBuffer();
+      for (var i = 0; i < maxPages; i++) {
+        buf.write(extractor.extractText(startPageIndex: i, endPageIndex: i));
+        buf.write('\n');
       }
       document.dispose();
 
-
-      text = text.substring(0, text.length > 3000 ? 3000 : text.length);
-
+      var text = buf.toString().trim();
+      if (text.isEmpty) {
+        throw Exception('Could not extract text from the selected PDF.');
+      }
+      if (text.length > 3000) {
+        text = text.substring(0, 3000);
+      }
 
       final summary = await _gemini.generateSummary(
-        "Summarize this PDF in:\n"
+        "Summarize this PDF:\n"
         "- 4–6 sentence executive summary\n"
         "- Key bullet points\n\n"
         "$text",
@@ -107,7 +122,6 @@ class _PdfSummarizerPageState extends State<PdfSummarizerPage> {
                     ),
                     const SizedBox(height: 20),
 
-                  
                     Wrap(
                       spacing: 12,
                       runSpacing: 12,
@@ -122,8 +136,7 @@ class _PdfSummarizerPageState extends State<PdfSummarizerPage> {
                           onPressed: (_picked != null && !_busy) ? _summarize : null,
                           child: _busy
                               ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
+                                  width: 18, height: 18,
                                   child: CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : const Text('Summarize'),
