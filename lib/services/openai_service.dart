@@ -1,51 +1,55 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
-
 
 class OpenAIService {
   OpenAIService({String? apiKey})
       : _apiKey = apiKey ??
             const String.fromEnvironment(
               'OPENAI_API_KEY',
-              defaultValue: 'YOUR_API_KEY_HERE', 
+              defaultValue: 'KEY', // for local testing only
             );
 
   final String _base = 'https://api.openai.com/v1';
   final String _apiKey;
 
+  /// Upload a PDF to the Files API. On web we MUST use bytes (no .path).
   Future<String> uploadPdf(PlatformFile f) async {
     final uri = Uri.parse('$_base/files');
     final req = http.MultipartRequest('POST', uri)
       ..headers['Authorization'] = 'Bearer $_apiKey'
       ..fields['purpose'] = 'user_data';
 
+    // ✅ Prefer bytes everywhere; on web .path is not available.
     http.MultipartFile part;
-    if (f.path != null) {
-      part = await http.MultipartFile.fromPath(
-        'file',
-        f.path!,
-        filename: f.name,
-        contentType: MediaType('application', 'pdf'),
-      );
-    } else if (f.bytes != null) {
+    if (f.bytes != null) {
       part = http.MultipartFile.fromBytes(
         'file',
         f.bytes as Uint8List,
         filename: f.name,
         contentType: MediaType('application', 'pdf'),
       );
+    } else if (!kIsWeb && f.path != null) {
+      // Native fallback when bytes aren't provided (mobile/desktop)
+      part = await http.MultipartFile.fromPath(
+        'file',
+        f.path!,
+        filename: f.name,
+        contentType: MediaType('application', 'pdf'),
+      );
     } else {
-      throw Exception('No file path or bytes found for upload.');
+      throw Exception(
+        'On web, PlatformFile.bytes must be available. Set withData: true in FilePicker.',
+      );
     }
 
     req.files.add(part);
 
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
-
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception('Upload failed: ${res.statusCode} ${res.body}');
     }
@@ -58,14 +62,13 @@ class OpenAIService {
     return fileId;
   }
 
-
+  /// Ask the Responses API to summarize the uploaded file.
   Future<String> summarizeFileId({
     required String fileId,
     String model = 'gpt-4o-mini',
     String? prompt,
   }) async {
     final uri = Uri.parse('$_base/responses');
-
     final body = {
       'model': model,
       'input': [
@@ -101,12 +104,9 @@ class OpenAIService {
     }
 
     final data = jsonDecode(res.body) as Map<String, dynamic>;
-
-
     final outputText = data['output_text'];
-    if (outputText is String && outputText.trim().isNotEmpty) {
-      return outputText;
-    }
+    if (outputText is String && outputText.trim().isNotEmpty) return outputText;
+
     final output = data['output'];
     if (output is List && output.isNotEmpty) {
       final first = output.first;
@@ -114,19 +114,16 @@ class OpenAIService {
         final content = first['content'] as List;
         if (content.isNotEmpty && content.first is Map) {
           final text = content.first['text'];
-          if (text is String && text.trim().isNotEmpty) {
-            return text;
-          }
+          if (text is String && text.trim().isNotEmpty) return text;
         }
       }
     }
 
-
+    // Fallback for schema variants
     return 'Received response but could not parse summary.\n\n'
         '${const JsonEncoder.withIndent("  ").convert(data)}';
   }
 
-  
   Future<String> summarizePdfFile(PlatformFile file,
       {String model = 'gpt-4o-mini', String? prompt}) async {
     final id = await uploadPdf(file);
