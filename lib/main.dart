@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'login_page.dart';
 import 'home_page.dart';
+import 'pdf_summarizer_page.dart';
 
 void main() {
   runApp(const MainApp());
@@ -25,6 +26,7 @@ class MainApp extends StatelessWidget {
       routes: {
         '/login': (_) => const LoginPage(),
         '/home': (_) => const HomePage(),
+        '/summarize': (_) => const PdfSummarizerPage(),
       },
     );
   }

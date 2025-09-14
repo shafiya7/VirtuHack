@@ -1,5 +1,5 @@
 name: flutter_application_1
-description: "A new Flutter project."
+description: "DocuLearn – PDF Summarizer demo"
 publish_to: 'none'
 version: 0.1.0
 
@@ -9,6 +9,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  http: ^1.2.2
+  http_parser: ^4.0.2
+  file_picker: ^8.0.3
+
 
 dev_dependencies:
   flutter_test:
